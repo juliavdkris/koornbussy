@@ -4,6 +4,7 @@ use axum::{
 	extract::Path
 };
 use tower_http::trace::TraceLayer;
+use tracing_subscriber::EnvFilter;
 
 
 const HOST: &str = "localhost";
@@ -12,7 +13,12 @@ const PORT: u16 = 8000;
 
 #[tokio::main]
 async fn main() {
-	tracing_subscriber::fmt::init();
+	let filter_layer = EnvFilter::try_from_default_env()
+		.unwrap_or(EnvFilter::new("info"));
+
+	tracing_subscriber::FmtSubscriber::builder()
+		.with_env_filter(filter_layer)
+		.init();
 
 	let app = Router::new()
 		.layer(TraceLayer::new_for_http())
@@ -22,7 +28,7 @@ async fn main() {
 	let listener = tokio::net::TcpListener::bind((HOST, PORT))
 		.await
 		.unwrap();
-	tracing::debug!("Listening on http://{}", listener.local_addr().unwrap());
+	tracing::info!("Listening on http://{}", listener.local_addr().unwrap());
 	axum::serve(listener, app).await.unwrap();
 }
 
