@@ -1,6 +1,8 @@
+mod proxy;
+
 use axum::{
     Router,
-	routing::get,
+	routing::{get, any_service},
 	extract::Path
 };
 use tower_http::trace::TraceLayer;
@@ -20,9 +22,11 @@ async fn main() {
 		.with_env_filter(filter_layer)
 		.init();
 
+	let reverse_proxy = tower::service_fn(proxy::reverse_proxy);
+
 	let app = Router::new()
 		.layer(TraceLayer::new_for_http())
-		.route("/", get(hello))
+		.route("/", any_service(reverse_proxy))
 		.route("/:name", get(hello_person));
 
 	let listener = tokio::net::TcpListener::bind((HOST, PORT))
@@ -32,10 +36,6 @@ async fn main() {
 	axum::serve(listener, app).await.unwrap();
 }
 
-
-async fn hello() -> &'static str {
-	"Hello world!"
-}
 
 async fn hello_person(Path(name): Path<String>) -> String {
 	format!("Hello, {name}!")
