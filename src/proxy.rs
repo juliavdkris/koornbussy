@@ -34,15 +34,33 @@ pub async fn reverse_proxy(req_in: Request) -> Result<Response, Infallible> {
 	let res = req_fwd.send_bytes(&req_in_body_bytes)
 		.expect("Failed to send request");
 
-	let res_u8s: http::Response<Vec<u8>> = res.into();
-	let res_compat = res_u8s.map(Body::from);
-
-	let res_koornbussified = koornbussify(res_compat);
+	let res_koornbussified = koornbussify(res);
 	Ok(res_koornbussified)
 }
 
 
-fn koornbussify(res: Response) -> Response {
-	// TODO: replace "koornbeurs" with "koornbussy"
-	res
+fn koornbussify(res: ureq::Response) -> Response {
+	let status = res.status();
+	let headers = res.headers_names().iter()
+		.map(|name| {
+			let value = res.header(name).unwrap();
+			(name.clone(), value.to_string())
+		})
+		.collect::<Vec<_>>();
+
+	let res_str = res.into_string().expect("Failed to read response body");
+	let res_koornbussified = res_str
+		.replace("koornbeurs", "koornbussy")
+		.replace("Koornbeurs", "Koornbussy");
+
+	let mut res_rebuilt = http::Response::builder()
+		.status(status);
+
+	for (name, value) in headers {
+		res_rebuilt = res_rebuilt.header(name, value);
+	}
+
+	res_rebuilt
+		.body(Body::from(res_koornbussified))
+		.expect("Failed to rebuild response")
 }
