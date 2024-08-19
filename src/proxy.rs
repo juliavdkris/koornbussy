@@ -5,62 +5,48 @@ use axum::{
 	http,
 };
 
-
 type Request = http::Request<Body>;
 type Response = http::Response<Body>;
 
 
-pub async fn reverse_proxy(req_in: Request) -> Result<Response, Infallible> {
-	let uri = req_in.uri();
-	let uri_fwd = http::Uri::builder()
+const PROXY_HOST: &str = "koornbeurs.nl";
+
+
+pub async fn reverse_proxy(mut req: Request) -> Result<Response, Infallible> {
+	let uri = req.uri_mut();
+	*uri = http::Uri::builder()
 		.scheme("https")
-		.authority("koornbeurs.nl")
+		.authority(PROXY_HOST)
 		.path_and_query(uri.path_and_query().unwrap().clone())
 		.build()
 		.expect("Failed to build URI");
 
-	let (req_in_parts, req_in_body) = req_in.into_parts();
-	let req_in_body_bytes = to_bytes(req_in_body, usize::MAX)
-		.await
-		.expect("Failed to read request body");
+	let (mut req_fwd, req_body_bytes) = http_request_to_ureq(req).await;
 
-	// Replace URI hostname and HOST header
-	let mut req_fwd_parts = req_in_parts.clone();
-	req_fwd_parts.uri = uri_fwd;
-	req_fwd_parts.headers.insert(http::header::HOST, "koornbeurs.nl".parse().unwrap());
+	req_fwd = req_fwd.set("host", PROXY_HOST);
 
-	let req_fwd: ureq::Request = req_fwd_parts.into();
-
-	let res = req_fwd.send_bytes(&req_in_body_bytes)
+	let res = req_fwd.send_bytes(&req_body_bytes)
 		.expect("Failed to send request");
 
-	let res_koornbussified = koornbussify(res);
-	Ok(res_koornbussified)
+	Ok(ureq_response_to_http(res).await)
 }
 
 
-fn koornbussify(res: ureq::Response) -> Response {
-	let status = res.status();
-	let headers = res.headers_names().iter()
-		.map(|name| {
-			let value = res.header(name).unwrap();
-			(name.clone(), value.to_string())
-		})
-		.collect::<Vec<_>>();
+async fn http_request_to_ureq(req: Request) -> (ureq::Request, Vec<u8>) {
+	let (req_parts, req_body) = req.into_parts();
+	let req_body_bytes = to_bytes(req_body, usize::MAX)
+		.await
+		.expect("Failed to read request body");
 
-	let res_str = res.into_string().expect("Failed to read response body");
-	let res_koornbussified = res_str
-		.replace("koornbeurs", "koornbussy")
-		.replace("Koornbeurs", "Koornbussy");
+	let req: ureq::Request = req_parts.into();
 
-	let mut res_rebuilt = http::Response::builder()
-		.status(status);
+	(req, req_body_bytes.into())
+}
 
-	for (name, value) in headers {
-		res_rebuilt = res_rebuilt.header(name, value);
-	}
 
-	res_rebuilt
-		.body(Body::from(res_koornbussified))
-		.expect("Failed to rebuild response")
+async fn ureq_response_to_http(res: ureq::Response) -> Response {
+	let res_bytes: http::Response<Vec<u8>> = res.into();
+	let (res_head, res_body) = res_bytes.into_parts();
+
+	http::Response::from_parts(res_head, Body::from(res_body))
 }
